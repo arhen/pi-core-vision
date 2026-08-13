@@ -1,0 +1,142 @@
+/**
+ * pi-vision self-check. Run: `bun src/self-check.ts` (from extension dir or anywhere).
+ * Imports only core.ts + photon — no pi packages, so plain bun resolves it.
+ */
+import { join } from "node:path";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  MIME,
+  MAX_IMAGE_BYTES,
+  configPath,
+  describeBase64,
+  describeRawFile,
+  loadConfig,
+  modelSupportsImages,
+  parseArgs,
+  resetConfigCache,
+  saveConfig,
+  setConfigPath,
+} from "./core.ts";
+
+const assert = (cond: boolean, msg: string) => {
+  if (!cond) throw new Error(`pi-vision self-check FAIL: ${msg}`);
+};
+
+// model capability detection
+assert(modelSupportsImages({ input: ["text", "image"] }), "vision model must be detected");
+assert(!modelSupportsImages({ input: ["text"] }), "text-only model must not be detected");
+assert(!modelSupportsImages(undefined), "missing model must not be detected");
+
+// env config (point configPath away so the real ~/.pi/pi-vision.json can't interfere)
+resetConfigCache();
+setConfigPath(join("/tmp", `pi-vision-env-${process.pid}.json`));
+process.env.PI_VISION_BASE_URL = "https://example.com/v1";
+const cfg = loadConfig();
+assert(cfg.baseUrl === "https://example.com/v1", "env baseUrl must load");
+assert(cfg.prompt.length > 20, "default prompt must exist");
+assert(cfg.maxTokens > 0, "maxTokens must default");
+delete process.env.PI_VISION_BASE_URL;
+setConfigPath(null); // back to real config
+resetConfigCache();
+
+// mime map
+assert(MIME[".png"] === "image/png", "png mime map");
+assert(!MIME[".txt"], "txt must not be treated as image");
+
+// command arg parsing
+const s = parseArgs("set baseUrl=https://x/v1 apiKey=sk-12345678 model=qwen-vl-max");
+assert(s.action === "set" && s.values.baseUrl === "https://x/v1" && s.values.model === "qwen-vl-max", "set parse");
+assert(parseArgs("show").action === "show" && parseArgs("").action === "show", "show parse");
+assert(parseArgs("reset").action === "reset", "reset parse");
+assert(parseArgs('set prompt="a b c"').values.prompt === "a b c", "quoted prompt parse");
+let threw = false;
+try {
+  parseArgs("set bogus=1");
+} catch {
+  threw = true;
+}
+assert(threw, "unknown key must throw");
+
+// save/load roundtrip via temp file
+setConfigPath(join("/tmp", `pi-vision-test-${process.pid}.json`));
+try {
+  const saved = saveConfig({ baseUrl: "https://tmp/v1", apiKey: "sk-test", model: "m" });
+  assert(saved.model === "m" && loadConfig().baseUrl === "https://tmp/v1", "save/load roundtrip");
+  saveConfig({ maxTokens: 42 });
+  assert(loadConfig().maxTokens === 42 && loadConfig().model === "m", "merge keeps prior keys");
+} finally {
+  rmSync(configPath, { force: true });
+  setConfigPath(null); // back to default ~/.pi/pi-vision.json
+}
+
+// describeBase64: mocked vision API roundtrip
+const originalFetch = globalThis.fetch;
+try {
+  globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body));
+    const imgUrl = body.messages[0].content.find((c: any) => c.type === "image_url").image_url.url;
+    assert(imgUrl.startsWith("data:image/jpeg;base64,"), "image must be base64 data URL");
+    assert(String(url).endsWith("/chat/completions"), "endpoint must be chat/completions");
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [{ message: { content: "a chart with 3 bars" } }],
+        usage: { prompt_tokens: 12, completion_tokens: 5 },
+      }),
+      text: async () => "",
+    } as unknown as Response;
+  }) as typeof fetch;
+
+  const out = await describeBase64("c2stZmFrZQ==", "image/jpeg", {
+    baseUrl: "https://api.example.com/v1",
+    apiKey: "k",
+    model: "m",
+    prompt: "p",
+    maxTokens: 100,
+  });
+  assert(out.text === "a chart with 3 bars", "description text passes through");
+  assert(out.usage?.input === 12 && out.usage?.output === 5, "usage maps from OpenAI fields");
+
+  // non-ok response → throws
+  globalThis.fetch = (async () => ({
+    ok: false,
+    status: 429,
+    text: async () => "rate limited",
+  }) as unknown as Response) as typeof fetch;
+  let apiThrew = false;
+  try {
+    await describeBase64("eA==", "image/png", {
+      baseUrl: "https://api.example.com/v1",
+      apiKey: "k",
+      model: "m",
+      prompt: "p",
+      maxTokens: 100,
+    });
+  } catch {
+    apiThrew = true;
+  }
+  assert(apiThrew, "API error must throw");
+} finally {
+  globalThis.fetch = originalFetch;
+}
+
+// describeRawFile: 20MB guard on raw fallback
+const bigFile = join("/tmp", `pi-vision-big-${process.pid}.bin`);
+writeFileSync(bigFile, Buffer.alloc(MAX_IMAGE_BYTES + 1));
+let bigThrew = false;
+try {
+  await describeRawFile(bigFile, {
+    baseUrl: "https://x/v1",
+    apiKey: "k",
+    model: "m",
+    prompt: "p",
+    maxTokens: 10,
+  });
+} catch {
+  bigThrew = true;
+}
+rmSync(bigFile, { force: true });
+assert(bigThrew, "raw fallback must reject >20MB images");
+
+console.log("pi-vision self-check OK");
