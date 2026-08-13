@@ -90,6 +90,8 @@ export function modelSupportsImages(model?: { input?: string[] }): boolean {
 /**
  * Send already-encoded base64 image to the vision API.
  * Used with pi's own resized output from the built-in read tool.
+ * `model` may be a comma-separated chain (try in order). Transient errors (5xx/429)
+ * get one retry; per-model failures fall through to the next model.
  */
 export async function describeBase64(
   data: string,
@@ -97,31 +99,60 @@ export async function describeBase64(
   cfg: VisionConfig,
   signal?: AbortSignal,
 ): Promise<{ text: string; usage?: { input: number; output: number } }> {
-  const res = await fetch(`${cfg.baseUrl.replace(/\/+$/, "")}/chat/completions`, {
-    method: "POST",
-    signal,
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${cfg.apiKey}`,
-    },
-    body: JSON.stringify({
-      model: cfg.model,
-      max_tokens: cfg.maxTokens,
-      stream: false, // some gateways (kitchen) stream SSE by default — force JSON
-      messages: [
-        {
-          role: "user",
-          content: [
-            { type: "text", text: cfg.prompt },
-            { type: "image_url", image_url: { url: `data:${mimeType};base64,${data}` } },
-          ],
-        },
-      ],
-    }),
+  const models = cfg.model.split(",").map((m) => m.trim()).filter(Boolean);
+  if (models.length === 0) throw new Error("pi-vision: no model configured");
+  let lastErr: Error | null = null;
+  for (const model of models) {
+    try {
+      return await describeOnce(data, mimeType, { ...cfg, model }, signal);
+    } catch (e) {
+      lastErr = e as Error;
+    }
+  }
+  throw lastErr ?? new Error("pi-vision: vision call failed");
+}
+
+async function describeOnce(
+  data: string,
+  mimeType: string,
+  cfg: VisionConfig,
+  signal?: AbortSignal,
+): Promise<{ text: string; usage?: { input: number; output: number } }> {
+  const body = JSON.stringify({
+    model: cfg.model,
+    max_tokens: cfg.maxTokens,
+    stream: false, // some gateways (kitchen) stream SSE by default — force JSON
+    messages: [
+      {
+        role: "user",
+        content: [
+          { type: "text", text: cfg.prompt },
+          { type: "image_url", image_url: { url: `data:${mimeType};base64,${data}` } },
+        ],
+      },
+    ],
   });
+  const attempt = async (): Promise<Response> =>
+    fetch(`${cfg.baseUrl.replace(/\/+$/, "")}/chat/completions`, {
+      method: "POST",
+      signal,
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${cfg.apiKey}`,
+      },
+      body,
+    });
+
+  let res = await attempt();
+  // One retry on transient failures (5xx/429/upstream-wrapped errors); skip for auth/config (401/403).
+  if (!res.ok && res.status !== 401 && res.status !== 403) {
+    await new Promise((r) => setTimeout(r, 1500));
+    if (signal?.aborted) throw new Error("pi-vision: aborted during retry");
+    res = await attempt();
+  }
   if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(`pi-vision: vision API ${res.status}: ${body.slice(0, 300)}`);
+    const text = await res.text().catch(() => "");
+    throw new Error(`pi-vision: vision API ${res.status}${cfg.model !== "" ? ` (${cfg.model})` : ""}: ${text.slice(0, 300)}`);
   }
   const dataJson = (await res.json()) as {
     choices?: { message?: { content?: unknown } }[];

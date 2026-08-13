@@ -100,12 +100,12 @@ try {
   assert(out.usage?.totalTokens === 17, "totalTokens sums");
   assert(typeof out.usage?.cost?.total === "number" && out.usage.cacheRead === 0, "usage shape complete (footer-safe)");
 
-  // non-ok response → throws
-  globalThis.fetch = (async () => ({
-    ok: false,
-    status: 429,
-    text: async () => "rate limited",
-  }) as unknown as Response) as typeof fetch;
+  // transient error (5xx/429) → retry once, then throw
+  let attempts = 0;
+  globalThis.fetch = (async () => {
+    attempts++;
+    return { ok: false, status: 502, text: async () => "upstream down" } as unknown as Response;
+  }) as typeof fetch;
   let apiThrew = false;
   try {
     await describeBase64("eA==", "image/png", {
@@ -118,7 +118,31 @@ try {
   } catch {
     apiThrew = true;
   }
-  assert(apiThrew, "API error must throw");
+  assert(apiThrew && attempts === 2, "transient error must retry once then throw");
+
+  // model chain: m1 502s, m2 succeeds
+  let calls: string[] = [];
+  globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+    const model = JSON.parse(String(init?.body)).model;
+    calls.push(model);
+    if (model === "m1") {
+      return { ok: false, status: 502, text: async () => "down" } as unknown as Response;
+    }
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ choices: [{ message: { content: "ok" } }], usage: { prompt_tokens: 1, completion_tokens: 1 } }),
+      text: async () => "",
+    } as unknown as Response;
+  }) as typeof fetch;
+  const chained = await describeBase64("eA==", "image/png", {
+    baseUrl: "https://api.example.com/v1",
+    apiKey: "k",
+    model: "m1,m2",
+    prompt: "p",
+    maxTokens: 100,
+  });
+  assert(chained.text === "ok" && calls.length === 3 && calls[0] === "m1" && calls[2] === "m2", "model chain must fall through to m2 after m1 retry")
 } finally {
   globalThis.fetch = originalFetch;
 }
