@@ -81,6 +81,11 @@ export default function (pi: ExtensionAPI) {
     label: "read (vision-aware)",
     description:
       "Read the contents of a file (relative or absolute). Supports text files and images (jpg, png, gif, webp, bmp). Image files are described as text when the active model cannot see images.",
+    promptSnippet: "Read file contents",
+    promptGuidelines: [
+      "Use read to examine files instead of cat or sed.",
+      "Use the read tool on image paths (screenshots, diagrams, pasted files) before answering — images are described as text when the active model cannot see them.",
+    ],
     parameters: Type.Object({
       path: Type.String({ description: "Path to the file to read (relative or absolute)" }),
       offset: Type.Optional(Type.Number({ description: "Line number to start reading from (1-indexed)" })),
