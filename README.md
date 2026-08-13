@@ -29,6 +29,8 @@ pi -e git:github.com/arhen/pi-vision
 
 ## Configure
 
+Two modes — **raw** (any OpenAI-compatible endpoint) or **registry** (models from pi's own registry, auth via `auth.json`/`/login`/env).
+
 Set the vision model via `/pi-vision` command, env vars, or `~/.pi/pi-vision.json` (JSON wins over env).
 
 ```bash
@@ -55,6 +57,25 @@ export PI_VISION_MODEL="gpt-4o-mini"
   "maxTokens": 1500
 }
 ```
+
+### Registry mode
+
+Use any model pi already knows — no duplicated credentials. The vision model must declare `"input": ["text", "image"]` in `models.json`, and auth resolves through pi's normal channels (stored credential in `auth.json`, `/login`, or provider `apiKey`).
+
+```json
+{
+  "provider": "anthropic",
+  "model": "claude-sonnet-4-5",
+  "maxTokens": 1500
+}
+```
+
+```bash
+/pi-vision set provider=anthropic model=claude-sonnet-4-5
+/pi-vision set provider=kitchen model=gemma-4-26b-a4b-it
+```
+
+OpenAI-compatible providers (openai-completions) are called through the extension's own transport (retry, SSE-safe, cache); other APIs (anthropic-messages, google-generative-ai, custom) go through pi's provider machinery.
 
 Any OpenAI-compatible endpoint works: OpenAI `/v1`, Google Gemini `/v1beta/openai`, Alibaba DashScope `/compatible-mode/v1`, Ollama `/v1`, LM Studio, vLLM. If your gateway streams SSE by default, the extension forces `stream: false`.
 

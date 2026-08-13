@@ -27,10 +27,14 @@
 import { existsSync, rmSync } from "node:fs";
 import { extname, resolve } from "node:path";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import type { VisionConfig } from "./src/core.ts";
 import { createReadToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import {
   MIME,
+  cacheGet,
+  cacheKey,
+  cacheSet,
   configPath,
   describeBase64,
   describeRawFile,
@@ -51,7 +55,8 @@ export default function (pi: ExtensionAPI) {
       if (action === "set") {
         const cfg = saveConfig(values);
         ctx.ui.notify(
-          `pi-vision: baseUrl=${cfg.baseUrl} model=${cfg.model} apiKey=${maskKey(cfg.apiKey)} (maxTokens=${cfg.maxTokens})`,
+          `pi-vision: ${cfg.provider ? `provider=${cfg.provider}` : `baseUrl=${cfg.baseUrl}`} model=${cfg.model} ` +
+            `apiKey=${cfg.provider ? "(registry auth)" : maskKey(cfg.apiKey ?? "")} (maxTokens=${cfg.maxTokens})`,
           "info",
         );
         return;
@@ -68,9 +73,10 @@ export default function (pi: ExtensionAPI) {
       }
       const cfg = loadConfig();
       const src = existsSync(configPath) ? "~/.pi/pi-vision.json" : "env vars / defaults";
+      const mode = cfg.provider ? `registry (${cfg.provider}/${cfg.model})` : `raw (${cfg.baseUrl || "?"} / ${cfg.model})`;
       ctx.ui.notify(
-        `pi-vision (from ${src}): baseUrl=${cfg.baseUrl || "(not set)"} model=${cfg.model || "(not set)"} ` +
-          `apiKey=${maskKey(cfg.apiKey)} maxTokens=${cfg.maxTokens}`,
+        `pi-vision (from ${src}): mode=${mode} ` +
+          `apiKey=${cfg.provider ? "(registry auth)" : maskKey(cfg.apiKey ?? "")} maxTokens=${cfg.maxTokens}`,
         "info",
       );
     },
@@ -134,7 +140,9 @@ export default function (pi: ExtensionAPI) {
       }
       onUpdate?.({ content: [{ type: "text", text: `Describing image via ${cfg.model}…` }] });
       try {
-        const { text, usage } = await describeBase64(image.data, image.mimeType, cfg, signal);
+        const { text, usage } = cfg.provider
+          ? await describeViaRegistry(image.data, image.mimeType, cfg, ctx)
+          : await describeBase64(image.data, image.mimeType, cfg, signal);
         return {
           // Description for the text-only parent model; image block kept so the
           // TUI (kitty/iTerm) and /resume still render it — pi's provider layer
@@ -167,6 +175,66 @@ function visionFailureResult(err: Error) {
     ],
     details: { vision: false },
   };
+}
+
+/**
+ * Registry mode: resolve the model through pi's registry and call it via pi's
+ * own provider machinery (completeSimple path) — supports anthropic-messages,
+ * google-generative-ai, openai-*, and custom provider APIs, with pi-managed
+ * auth (apiKey/oauth/headers). Cache is keyed per provider+model+image.
+ */
+async function describeViaRegistry(
+  data: string,
+  mimeType: string,
+  cfg: VisionConfig,
+  ctx: ExtensionCommandContext,
+): Promise<{ text: string; usage?: { input: number; output: number } }> {
+  const registry = ctx.modelRegistry;
+  const model = registry.find(cfg.provider ?? "", cfg.model);
+  if (!model) {
+    throw new Error(`pi-vision: model ${cfg.provider}/${cfg.model} not found in pi's registry`);
+  }
+
+  // OpenAI-compatible providers: reuse our own transport (retry + stream:false + cache),
+  // with auth/baseUrl resolved through pi's registry (auth.json / env / provider config).
+  if (model.api === "openai-completions") {
+    const auth = await registry.getProviderAuth(cfg.provider ?? "");
+    const baseUrl = auth?.auth.baseUrl ?? model.baseUrl;
+    const apiKey = auth?.auth.apiKey;
+    if (!baseUrl || !apiKey) {
+      throw new Error(`pi-vision: no resolved auth for provider ${cfg.provider} (openai-completions)`);
+    }
+    return describeBase64(
+      data,
+      mimeType,
+      { ...cfg, baseUrl, apiKey },
+      ctx.signal,
+      auth.auth.headers as Record<string, string> | undefined,
+    );
+  }
+
+  // Other APIs (anthropic-messages, google-generative-ai, custom): pi's provider
+  // machinery handles request/response shaping. Cache keyed per provider+model+image.
+  const key = cacheKey(data, { ...cfg, baseUrl: `registry:${cfg.provider ?? ""}` });
+  const cached = cacheGet(key);
+  if (cached !== undefined) return { text: cached };
+
+  const message = await registry.complete(model, [
+    { type: "text", text: cfg.prompt },
+    { type: "image", data, mimeType },
+  ]);
+  const text = (message.content ?? [])
+    .filter((c) => c.type === "text")
+    .map((c) => c.text)
+    .join("\n")
+    .trim();
+  if (!text) {
+    throw new Error(
+      `pi-vision: registry model returned empty content (stopReason=${(message as { stopReason?: string }).stopReason}, error=${(message as { errorMessage?: string }).errorMessage ?? "none"})`,
+    );
+  }
+  cacheSet(key, text);
+  return { text, usage: message.usage };
 }
 
 /**

@@ -26,8 +26,12 @@ export const DEFAULT_PROMPT = `Describe this image as text for a text-only LLM t
 Plain text with markdown structure, no preamble.`;
 
 export interface VisionConfig {
-  baseUrl: string;
-  apiKey: string;
+  /** Raw mode: any OpenAI-compatible endpoint (keep as-is). */
+  baseUrl?: string;
+  apiKey?: string;
+  /** Registry mode: pi-registered provider id (models.json / /login). */
+  provider?: string;
+  /** Model id: raw mode = gateway model id; registry mode = model id under provider. */
   model: string;
   prompt: string;
   maxTokens: number;
@@ -77,6 +81,7 @@ export function loadConfig(): VisionConfig {
   cfgCache = {
     baseUrl: file.baseUrl ?? env.PI_VISION_BASE_URL ?? "",
     apiKey: file.apiKey ?? env.PI_VISION_API_KEY ?? "",
+    provider: file.provider ?? env.PI_VISION_PROVIDER ?? undefined,
     model: file.model ?? env.PI_VISION_MODEL ?? "",
     prompt: file.prompt ?? DEFAULT_PROMPT,
     maxTokens: file.maxTokens ?? 1500,
@@ -99,13 +104,14 @@ export async function describeBase64(
   mimeType: string,
   cfg: VisionConfig,
   signal?: AbortSignal,
+  extraHeaders?: Record<string, string>,
 ): Promise<{ text: string; usage?: { input: number; output: number } }> {
   const models = cfg.model.split(",").map((m) => m.trim()).filter(Boolean);
   if (models.length === 0) throw new Error("pi-vision: no model configured");
   let lastErr: Error | null = null;
   for (const model of models) {
     try {
-      return await describeOnce(data, mimeType, { ...cfg, model }, signal);
+      return await describeOnce(data, mimeType, { ...cfg, model }, signal, extraHeaders);
     } catch (e) {
       lastErr = e as Error;
     }
@@ -118,6 +124,7 @@ async function describeOnce(
   mimeType: string,
   cfg: VisionConfig,
   signal?: AbortSignal,
+  extraHeaders?: Record<string, string>,
 ): Promise<{ text: string; usage?: { input: number; output: number } }> {
   // Cache hit → instant, zero tokens.
   const key = cacheKey(data, cfg);
@@ -145,6 +152,7 @@ async function describeOnce(
       headers: {
         "content-type": "application/json",
         authorization: `Bearer ${cfg.apiKey}`,
+        ...(extraHeaders ?? {}),
       },
       body,
     });
@@ -233,8 +241,8 @@ export function parseArgs(args: string): { action: "set" | "show" | "reset"; val
     const key = tok.slice(0, eq) as keyof VisionConfig;
     let value = tok.slice(eq + 1);
     if (value.length >= 2 && value.startsWith('"') && value.endsWith('"')) value = value.slice(1, -1);
-    if (!["baseUrl", "apiKey", "model", "prompt", "maxTokens"].includes(key)) {
-      throw new Error(`Unknown setting "${key}". Known: baseUrl, apiKey, model, prompt, maxTokens`);
+    if (!["baseUrl", "apiKey", "provider", "model", "prompt", "maxTokens"].includes(key)) {
+      throw new Error(`Unknown setting "${key}". Known: baseUrl, apiKey, provider, model, prompt, maxTokens`);
     }
     values[key] = key === "maxTokens" ? Number(value) : value;
   }
@@ -242,6 +250,7 @@ export function parseArgs(args: string): { action: "set" | "show" | "reset"; val
 }
 
 export function isConfigComplete(cfg: VisionConfig): boolean {
+  if (cfg.provider) return !!cfg.provider && !!cfg.model;
   return !!cfg.baseUrl && !!cfg.apiKey && !!cfg.model;
 }
 

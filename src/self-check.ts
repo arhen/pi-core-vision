@@ -15,6 +15,7 @@ import {
   configPath,
   describeBase64,
   describeRawFile,
+  isConfigComplete,
   loadConfig,
   modelSupportsImages,
   parseArgs,
@@ -56,6 +57,10 @@ assert(!MIME[".txt"], "txt must not be treated as image");
 // command arg parsing
 const s = parseArgs("set baseUrl=https://x/v1 apiKey=sk-12345678 model=qwen-vl-max");
 assert(s.action === "set" && s.values.baseUrl === "https://x/v1" && s.values.model === "qwen-vl-max", "set parse");
+const sp = parseArgs("set provider=kitchen model=gemma");
+assert(sp.values.provider === "kitchen" && sp.values.model === "gemma", "registry-mode parse");
+assert(isConfigComplete({ provider: "kitchen", model: "gemma", prompt: "p", maxTokens: 10 }), "registry mode complete");
+assert(!isConfigComplete({ provider: "kitchen", model: "", prompt: "p", maxTokens: 10 }), "registry mode needs model");
 assert(parseArgs("show").action === "show" && parseArgs("").action === "show", "show parse");
 assert(parseArgs("reset").action === "reset", "reset parse");
 assert(parseArgs('set prompt="a b c"').values.prompt === "a b c", "quoted prompt parse");
