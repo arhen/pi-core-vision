@@ -97,6 +97,8 @@ try {
   });
   assert(out.text === "a chart with 3 bars", "description text passes through");
   assert(out.usage?.input === 12 && out.usage?.output === 5, "usage maps from OpenAI fields");
+  assert(out.usage?.totalTokens === 17, "totalTokens sums");
+  assert(typeof out.usage?.cost?.total === "number" && out.usage.cacheRead === 0, "usage shape complete (footer-safe)");
 
   // non-ok response → throws
   globalThis.fetch = (async () => ({

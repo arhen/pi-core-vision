@@ -133,10 +133,16 @@ export async function describeBase64(
   }
   return {
     text,
-    usage:
-      dataJson.usage && typeof dataJson.usage.prompt_tokens === "number"
-        ? { input: dataJson.usage.prompt_tokens, output: dataJson.usage.completion_tokens ?? 0 }
-        : undefined,
+    usage: dataJson.usage && typeof dataJson.usage.prompt_tokens === "number"
+      ? {
+          input: dataJson.usage.prompt_tokens,
+          output: dataJson.usage.completion_tokens ?? 0,
+          cacheRead: 0,
+          cacheWrite: 0,
+          totalTokens: (dataJson.usage.prompt_tokens ?? 0) + (dataJson.usage.completion_tokens ?? 0),
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }, // gateway pricing unknown
+        }
+      : undefined,
   };
 }
 
