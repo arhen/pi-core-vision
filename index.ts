@@ -136,7 +136,13 @@ export default function (pi: ExtensionAPI) {
       try {
         const { text, usage } = await describeBase64(image.data, image.mimeType, cfg, signal);
         return {
-          content: [{ type: "text", text: untrustedImageText(cfg.model, text) }],
+          // Description for the text-only parent model; image block kept so the
+          // TUI (kitty/iTerm) and /resume still render it — pi's provider layer
+          // strips image blocks for non-vision models anyway.
+          content: [
+            { type: "text", text: untrustedImageText(cfg.model, text) },
+            { type: "image", data: image.data, mimeType: image.mimeType },
+          ],
           details: { vision: true },
           usage, // nested LLM usage → counted in pi session stats
         };
