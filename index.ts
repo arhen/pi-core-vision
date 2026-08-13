@@ -112,12 +112,16 @@ export default function (pi: ExtensionAPI) {
         // Text-only model: fall back to raw file describe when the path looks like an image.
         if (!cfgReady || !MIME[extname(absolutePath).toLowerCase()]) return result;
         onUpdate?.({ content: [{ type: "text", text: `Describing image via ${cfg.model}…` }] });
-        const { text, usage } = await describeRawFile(absolutePath, cfg, signal);
-        return {
-          content: [{ type: "text", text: untrustedImageText(cfg.model, text) }],
-          details: { vision: true },
-          usage,
-        };
+        try {
+          const { text, usage } = await describeRawFile(absolutePath, cfg, signal);
+          return {
+            content: [{ type: "text", text: untrustedImageText(cfg.model, text) }],
+            details: { vision: true },
+            usage,
+          };
+        } catch (e) {
+          return visionFailureResult(e as Error);
+        }
       }
 
       // Text-only model + image: pi attached an image the model can't see.
@@ -129,14 +133,34 @@ export default function (pi: ExtensionAPI) {
         );
       }
       onUpdate?.({ content: [{ type: "text", text: `Describing image via ${cfg.model}…` }] });
-      const { text, usage } = await describeBase64(image.data, image.mimeType, cfg, signal);
-      return {
-        content: [{ type: "text", text: untrustedImageText(cfg.model, text) }],
-        details: { vision: true },
-        usage, // nested LLM usage → counted in pi session stats
-      };
+      try {
+        const { text, usage } = await describeBase64(image.data, image.mimeType, cfg, signal);
+        return {
+          content: [{ type: "text", text: untrustedImageText(cfg.model, text) }],
+          details: { vision: true },
+          usage, // nested LLM usage → counted in pi session stats
+        };
+      } catch (e) {
+        return visionFailureResult(e as Error);
+      }
     },
   });
+}
+
+/**
+ * Graceful failure: return a placeholder instead of throwing, so the parent
+ * model moves on (OCR, ask user) instead of retry-looping a dead vision API.
+ */
+function visionFailureResult(err: Error) {
+  return {
+    content: [
+      {
+        type: "text",
+        text: `[image: description unavailable — ${err.message.slice(0, 200)}. The image was not described; use OCR or ask the user if you need its content.]`,
+      },
+    ],
+    details: { vision: false },
+  };
 }
 
 /**
