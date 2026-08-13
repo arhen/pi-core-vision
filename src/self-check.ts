@@ -7,6 +7,11 @@ import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import {
   MIME,
   MAX_IMAGE_BYTES,
+  cacheGet,
+  cacheKey,
+  cacheSet,
+  cacheSize,
+  clearCache,
   configPath,
   describeBase64,
   describeRawFile,
@@ -15,12 +20,17 @@ import {
   parseArgs,
   resetConfigCache,
   saveConfig,
+  setCachePath,
   setConfigPath,
 } from "./core.ts";
 
 const assert = (cond: boolean, msg: string) => {
   if (!cond) throw new Error(`pi-vision self-check FAIL: ${msg}`);
 };
+
+// isolate cache from the real ~/.pi cache for the whole run
+setCachePath(join("/tmp", `pi-vision-cache-${process.pid}.json`));
+clearCache();
 
 // model capability detection
 assert(modelSupportsImages({ input: ["text", "image"] }), "vision model must be detected");
@@ -146,6 +156,46 @@ try {
 } finally {
   globalThis.fetch = originalFetch;
 }
+
+// cache: hit/miss + model-scoped keys + LRU eviction
+setCachePath(join("/tmp", `pi-vision-cache2-${process.pid}.json`));
+clearCache();
+const cfgA = { baseUrl: "https://x/v1", apiKey: "k", model: "gemma", prompt: "p", maxTokens: 10 };
+const keyA = cacheKey("QUJD", cfgA);
+const keyB = cacheKey("QUJD", { ...cfgA, model: "sonnet" });
+const keyC = cacheKey("REVG", cfgA);
+assert(keyA !== keyB && keyA !== keyC, "cache keys must differ by model and image");
+assert(cacheGet(keyA) === undefined, "miss before set");
+cacheSet(keyA, "desc1");
+cacheSet(keyB, "desc2");
+cacheSet(keyC, "desc3");
+assert(cacheGet(keyA) === "desc1" && cacheSize() === 3, "hit after set");
+
+// describeBase64 uses the cache: second identical call must not hit the API
+// (distinct image data — no collision with the manually-seeded keys above)
+let fetches = 0;
+globalThis.fetch = (async () => {
+  fetches++;
+  return {
+    ok: true,
+    status: 200,
+    json: async () => ({ choices: [{ message: { content: "cached-now" } }], usage: { prompt_tokens: 9, completion_tokens: 3 } }),
+    text: async () => "",
+  } as unknown as Response;
+}) as typeof fetch;
+const first = await describeBase64("QUJERUZH", "image/png", cfgA);
+const second = await describeBase64("QUJERUZH", "image/png", cfgA);
+assert(first.text === "cached-now" && second.text === "cached-now", "both calls return description");
+assert(fetches === 1, "second call must be a cache hit (1 fetch total)");
+assert(second.usage === undefined, "cache hit carries no usage");
+
+// cache result: description must survive a fresh load from disk
+// (persist is debounced; the pending timer writes to the CURRENT cachePath)
+setCachePath(join("/tmp", `pi-vision-cache2-${process.pid}.json`));
+await new Promise((r) => setTimeout(r, 1300));
+clearCache(); // reload from disk on next access
+assert(cacheGet(keyC) === "desc3", "description must survive disk roundtrip");
+assert(cacheGet(cacheKey("QUJERUZH", cfgA)) === "cached-now", "fetch-cached entry survives disk roundtrip too");
 
 // describeRawFile: 20MB guard on raw fallback
 const bigFile = join("/tmp", `pi-vision-big-${process.pid}.bin`);

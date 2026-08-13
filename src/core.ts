@@ -1,6 +1,7 @@
 /**
  * pi-vision core — pure logic, no pi imports. Runs under plain `bun` for self-checks.
  */
+import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -118,6 +119,11 @@ async function describeOnce(
   cfg: VisionConfig,
   signal?: AbortSignal,
 ): Promise<{ text: string; usage?: { input: number; output: number } }> {
+  // Cache hit → instant, zero tokens.
+  const key = cacheKey(data, cfg);
+  const cached = cacheGet(key);
+  if (cached !== undefined) return { text: cached };
+
   const body = JSON.stringify({
     model: cfg.model,
     max_tokens: cfg.maxTokens,
@@ -162,6 +168,7 @@ async function describeOnce(
   if (typeof text !== "string" || !text.trim()) {
     throw new Error("pi-vision: unexpected or empty API response");
   }
+  cacheSet(key, text);
   return {
     text,
     usage: dataJson.usage && typeof dataJson.usage.prompt_tokens === "number"
@@ -236,4 +243,80 @@ export function parseArgs(args: string): { action: "set" | "show" | "reset"; val
 
 export function isConfigComplete(cfg: VisionConfig): boolean {
   return !!cfg.baseUrl && !!cfg.apiKey && !!cfg.model;
+}
+
+// --- description cache -------------------------------------------------------
+// Content-addressed (sha1 of image bytes + model + baseUrl), LRU in memory,
+// lazily persisted to disk so repeat reads across sessions are instant.
+
+const CACHE_MAX = 200;
+export let cachePath = join(homedir(), ".pi", "pi-vision-cache.json");
+let cache = new Map<string, string>();
+let cacheLoaded = false;
+let persistTimer: ReturnType<typeof setTimeout> | null = null;
+
+export function setCachePath(path: string | null) {
+  cachePath = path ?? join(homedir(), ".pi", "pi-vision-cache.json");
+  cacheLoaded = false;
+}
+
+export function clearCache() {
+  cache.clear();
+  cacheLoaded = false; // next access re-reads disk (may be empty — fine)
+}
+
+export function cacheSize(): number {
+  return cache.size;
+}
+
+function loadCache() {
+  if (cacheLoaded) return;
+  cacheLoaded = true;
+  try {
+    const raw = JSON.parse(readFileSync(cachePath, "utf8")) as Record<string, string>;
+    const entries = Object.entries(raw);
+    // keep the last CACHE_MAX (JSON object order = insertion order for string keys)
+    for (const [k, v] of entries.slice(-CACHE_MAX)) cache.set(k, v);
+  } catch {
+    // no cache yet or corrupt — start empty
+  }
+}
+
+function persistCache() {
+  if (persistTimer) clearTimeout(persistTimer);
+  persistTimer = setTimeout(() => {
+    persistTimer = null;
+    try {
+      mkdirSync(dirname(cachePath), { recursive: true });
+      writeFileSync(cachePath, JSON.stringify(Object.fromEntries(cache)), { mode: 0o600 });
+    } catch {
+      // cache is best-effort
+    }
+  }, 1000);
+}
+
+export function cacheKey(data: string, cfg: VisionConfig): string {
+  return createHash("sha1").update(`${cfg.baseUrl}|${cfg.model}|${data}`).digest("hex");
+}
+
+export function cacheGet(key: string): string | undefined {
+  loadCache();
+  const hit = cache.get(key);
+  if (hit !== undefined) {
+    cache.delete(key); // LRU touch
+    cache.set(key, hit);
+  }
+  return hit;
+}
+
+export function cacheSet(key: string, text: string) {
+  loadCache();
+  cache.delete(key);
+  cache.set(key, text);
+  while (cache.size > CACHE_MAX) {
+    const oldest = cache.keys().next().value as string | undefined;
+    if (oldest === undefined) break;
+    cache.delete(oldest);
+  }
+  persistCache();
 }
