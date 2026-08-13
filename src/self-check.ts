@@ -20,6 +20,7 @@ import {
   modelSupportsImages,
   parseArgs,
   resetConfigCache,
+  retryAfterMs,
   saveConfig,
   setCachePath,
   setConfigPath,
@@ -119,9 +120,15 @@ try {
   let attempts = 0;
   globalThis.fetch = (async () => {
     attempts++;
-    return { ok: false, status: 502, text: async () => "upstream down" } as unknown as Response;
+    return {
+      ok: false,
+      status: 429,
+      headers: new Headers({ "retry-after": "1" }),
+      text: async () => "Requests per minute limit exceeded",
+    } as unknown as Response;
   }) as typeof fetch;
   let apiThrew = false;
+  const t0 = Date.now();
   try {
     await describeBase64("eA==", "image/png", {
       baseUrl: "https://api.example.com/v1",
@@ -134,6 +141,12 @@ try {
     apiThrew = true;
   }
   assert(apiThrew && attempts === 2, "transient error must retry once then throw");
+  assert(Date.now() - t0 >= 900, "429 retry must honor Retry-After (>= ~1s wait)");
+
+  // retryAfterMs parsing
+  assert(retryAfterMs("57", "") === 30000, "Retry-After must be capped at 30s");
+  assert(retryAfterMs(null, "reset after 5s") === 5000, "body reset-after parsed");
+  assert(retryAfterMs(null, "no hints here") === 1500, "default backoff");
 
   // model chain: m1 502s, m2 succeeds
   let calls: string[] = [];

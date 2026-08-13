@@ -159,8 +159,12 @@ async function describeOnce(
 
   let res = await attempt();
   // One retry on transient failures (5xx/429/upstream-wrapped errors); skip for auth/config (401/403).
+  // For 429, honor Retry-After / "reset after Xs" hints (rate-limited providers like Cerebras
+  // at 5 req/min) — capped at 30s so the agent never stalls long on one read.
   if (!res.ok && res.status !== 401 && res.status !== 403) {
-    await new Promise((r) => setTimeout(r, 1500));
+    const bodyText = await res.text().catch(() => "");
+    const waitMs = res.status === 429 ? retryAfterMs(res.headers.get("retry-after"), bodyText) : 1500;
+    await new Promise((r) => setTimeout(r, waitMs));
     if (signal?.aborted) throw new Error("pi-vision: aborted during retry");
     res = await attempt();
   }
@@ -247,6 +251,24 @@ export function parseArgs(args: string): { action: "set" | "show" | "reset"; val
     values[key] = key === "maxTokens" ? Number(value) : value;
   }
   return { action: "set", values };
+}
+
+/**
+ * 429 backoff: Retry-After header (seconds), or "reset after Xs"/"X seconds" in the body.
+ * Capped at 30s so a rate-limited read degrades to the placeholder instead of stalling.
+ */
+export function retryAfterMs(header: string | null, body: string): number {
+  const cap = 30_000;
+  if (header) {
+    const s = Number(header.trim());
+    if (Number.isFinite(s) && s > 0) return Math.min(s * 1000, cap);
+  }
+  const m = body.match(/reset after\s+(\d+)\s*s/i) ?? body.match(/(\d+)\s*(?:seconds|s)\b/i);
+  if (m) {
+    const s = Number(m[1]);
+    if (Number.isFinite(s) && s > 0) return Math.min(s * 1000, cap);
+  }
+  return 1500;
 }
 
 export function isConfigComplete(cfg: VisionConfig): boolean {
