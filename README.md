@@ -60,6 +60,36 @@ Any OpenAI-compatible endpoint works: OpenAI `/v1`, Google Gemini `/v1beta/opena
 - Nested vision usage is reported back, so pi session stats stay accurate.
 - Raw-file fallback (with 20MB guard) covers the case where pi's image processing is unavailable (e.g. BMP).
 
+## Benchmark
+
+Single-run comparison vs community alternatives, text-only parent model (deepseek-v4-flash), same screenshot through the same kitchen gateway. See also [pi-vision-handoff](https://github.com/monotykamary/pi-vision-handoff) and [pi-sense](https://github.com/ssdiwu/pi-sense).
+
+### Healthy vision model (gemma-4-26b via kitchen)
+
+| tool | e2e | flow | precision |
+|---|---|---|---|
+| **pi-vision (this)** | **32s** | clean 1 read → description in result | **6/6 facts** (title, theme, tabs, chat, layout) |
+| pi-vision-handoff | 44s | clean 1 read → context swap | 5/6 |
+| pi-sense | 122s | description in result | ~5/6 |
+
+### Vision API down (kitchen haiku 429 for the whole window)
+
+| tool | result |
+|---|---|
+| **pi-vision (pre-fix)** | 200s+ hang — threw on 429 → parent retry-looped the read |
+| **pi-vision (post-fix)** | **19s** — graceful `[image: description unavailable]` → model moves on |
+| pi-vision-handoff | 42s — graceful placeholder → OCR fallback |
+| pi-sense | 27s — graceful placeholder → OCR fallback |
+
+Findings:
+- Fastest end-to-end when vision is healthy, and the only tool that returns the full description inside the read result.
+- Vision failures degrade gracefully (placeholder text, no hang) — shipped after the 429 incident above.
+- Descriptions are framed as UNTRUSTED DATA (prompt-injection mitigation).
+
+Caveats: single run per cell; gateway routing flakiness affects variance.
+
+Caveats: single run per cell; gateway routing flakiness affects variance.
+
 ## Development
 
 ```bash
