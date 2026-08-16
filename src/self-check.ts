@@ -143,6 +143,37 @@ try {
   assert(apiThrew && attempts === 2, "transient error must retry once then throw");
   assert(Date.now() - t0 >= 900, "429 retry must honor Retry-After (>= ~1s wait)");
 
+  // transient error + abort signal: clean rejection during the backoff — no second
+  // attempt, no waiting out the full Retry-After (regression: rejectRetry was never
+  // defined, so signal + transient error threw ReferenceError instead of retrying)
+  let abortedAttempts = 0;
+  const ac = new AbortController();
+  globalThis.fetch = (async () => {
+    abortedAttempts++;
+    return {
+      ok: false,
+      status: 429,
+      headers: new Headers({ "retry-after": "5" }),
+      text: async () => "Requests per minute limit exceeded",
+    } as unknown as Response;
+  }) as typeof fetch;
+  let abortErr: Error | null = null;
+  const abortT0 = Date.now();
+  const abortP = describeBase64("eA==", "image/png", {
+    baseUrl: "https://api.example.com/v1",
+    apiKey: "k",
+    model: "m",
+    prompt: "p",
+    maxTokens: 100,
+  }, ac.signal).catch((e: unknown) => {
+    abortErr = e instanceof Error ? e : new Error(String(e));
+  });
+  setTimeout(() => ac.abort(), 150);
+  await abortP;
+  assert(abortErr !== null && abortErr.message.includes("aborted during retry"), "abort during retry must reject with a clear message");
+  assert(abortedAttempts === 1, "abort during retry must not trigger a second attempt");
+  assert(Date.now() - abortT0 < 2000, "abort must cut the backoff short (not wait 5s)");
+
   // retryAfterMs parsing
   assert(retryAfterMs("57", "") === 30000, "Retry-After must be capped at 30s");
   assert(retryAfterMs(null, "reset after 5s") === 5000, "body reset-after parsed");

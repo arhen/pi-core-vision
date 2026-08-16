@@ -194,6 +194,13 @@ async function describeViaRegistry(
   if (!model) {
     throw new Error(`pi-vision: model ${cfg.provider}/${cfg.model} not found in pi's registry`);
   }
+  // README contract: the model must declare image input in models.json.
+  if (!modelSupportsImages(model)) {
+    throw new Error(
+      `pi-vision: model ${cfg.provider}/${cfg.model} is text-only (input=${JSON.stringify(model.input)}); ` +
+        'configure a model that declares "input": ["text", "image"]',
+    );
+  }
 
   // OpenAI-compatible providers: reuse our own transport (retry + stream:false + cache),
   // with auth/baseUrl resolved through pi's registry (auth.json / env / provider config).

@@ -3,7 +3,7 @@
  */
 import { createHash } from "node:crypto";
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, extname, join } from "node:path";
 
@@ -58,6 +58,14 @@ export function saveConfig(partial: Partial<VisionConfig>): VisionConfig {
     // no file yet
   }
   const merged = { ...existing, ...partial } as VisionConfig;
+  // Raw (baseUrl/apiKey) and registry (provider) modes are mutually exclusive:
+  // setting one drops the other, so a lingering `provider` key can't silently flip
+  // `/pi-vision set baseUrl=...` into registry mode (and vice-versa).
+  if (partial.baseUrl !== undefined || partial.apiKey !== undefined) delete merged.provider;
+  if (partial.provider !== undefined) {
+    delete merged.baseUrl;
+    delete merged.apiKey;
+  }
   mkdirSync(dirname(configPath), { recursive: true });
   writeFileSync(configPath, JSON.stringify(merged, null, 2) + "\n", { mode: 0o600 });
   try {
@@ -78,13 +86,15 @@ export function loadConfig(): VisionConfig {
     // no config file — env vars only
   }
   const env = process.env;
+  const maxTokens = file.maxTokens ?? 1500;
   cfgCache = {
     baseUrl: file.baseUrl ?? env.PI_VISION_BASE_URL ?? "",
     apiKey: file.apiKey ?? env.PI_VISION_API_KEY ?? "",
     provider: file.provider ?? env.PI_VISION_PROVIDER ?? undefined,
     model: file.model ?? env.PI_VISION_MODEL ?? "",
     prompt: file.prompt ?? DEFAULT_PROMPT,
-    maxTokens: file.maxTokens ?? 1500,
+    // hand-edited JSON may carry a bogus maxTokens — same check as the CLI
+    maxTokens: Number.isFinite(maxTokens) && maxTokens > 0 ? maxTokens : 1500,
   };
   return cfgCache;
 }
@@ -94,9 +104,37 @@ export function modelSupportsImages(model?: { input?: string[] }): boolean {
 }
 
 /**
+ * Retry backoff that rejects immediately when `signal` aborts. The abort listener
+ * is removed in `finally`, so it never leaks after the wait completes or aborts.
+ */
+async function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (!signal) {
+    await new Promise((r) => setTimeout(r, ms));
+    return;
+  }
+  let onAbort: (() => void) | undefined;
+  try {
+    await new Promise<void>((resolve, reject) => {
+      if (signal.aborted) {
+        reject(new Error("pi-vision: aborted during retry"));
+        return;
+      }
+      const t = setTimeout(resolve, ms);
+      onAbort = () => {
+        clearTimeout(t);
+        reject(new Error("pi-vision: aborted during retry"));
+      };
+      signal.addEventListener("abort", onAbort, { once: true });
+    });
+  } finally {
+    if (onAbort) signal.removeEventListener("abort", onAbort);
+  }
+}
+
+/**
  * Send already-encoded base64 image to the vision API.
  * Used with pi's own resized output from the built-in read tool.
- * `model` may be a comma-separated chain (try in order). Transient errors (5xx/429)
+ * `model` may be a comma-separated chain (try in order). Transient errors (408/429/5xx)
  * get one retry; per-model failures fall through to the next model.
  */
 export async function describeBase64(
@@ -161,26 +199,14 @@ async function describeOnce(
   };
 
   let res = await attempt();
-  // One retry on transient failures (5xx/429/upstream-wrapped errors); skip for auth/config (401/403).
-  // For 429, honor Retry-After / "reset after Xs" hints (rate-limited providers like Cerebras
+  // One retry on transient failures (408/429/5xx); skip for auth/config (401/403)
+  // and definitive client errors (4xx) — retrying those never succeeds. For 429,
+  // honor Retry-After / "reset after Xs" hints (rate-limited providers like Cerebras
   // at 5 req/min) — capped at 30s so the agent never stalls long on one read.
-  if (!res.ok && res.status !== 401 && res.status !== 403) {
+  if (!res.ok && (res.status === 408 || res.status === 429 || res.status >= 500)) {
     const bodyText = await res.text().catch(() => "");
     const waitMs = res.status === 429 ? retryAfterMs(res.headers.get("retry-after"), bodyText) : 1500;
-    const sleep = new Promise((r) => setTimeout(r, waitMs));
-    if (signal) {
-      const onAbort = () => rejectRetry(new Error("pi-vision: aborted during retry"));
-      signal.addEventListener("abort", onAbort, { once: true });
-      try {
-        await Promise.race([sleep, new Promise((_, reject) => rejectRetry(new Error("pi-vision: aborted during retry")))]).catch((e: unknown) => {
-          throw e instanceof Error ? e : new Error("pi-vision: aborted during retry");
-        });
-      } finally {
-        signal.removeEventListener("abort", onAbort);
-      }
-    } else {
-      await sleep;
-    }
+    await sleep(waitMs, signal);
     res = await attempt();
   }
   if (!res.ok) {
@@ -221,6 +247,13 @@ export async function describeRawFile(
 ): Promise<{ text: string; usage?: { input: number; output: number } }> {
   const mimeType = MIME[extname(path).toLowerCase()];
   if (!mimeType) throw new Error(`pi-vision: unsupported image type "${extname(path)}"`);
+  // Stat first: bail on oversized files before reading them into memory.
+  const info = await stat(path).catch(() => null);
+  if (info && info.size > MAX_IMAGE_BYTES) {
+    throw new Error(
+      `pi-vision: image too large (${(info.size / 1048576).toFixed(1)}MB > 20MB). Downscale it first.`,
+    );
+  }
   const bytes = await readFile(path);
   if (bytes.byteLength > MAX_IMAGE_BYTES) {
     throw new Error(
