@@ -1,9 +1,9 @@
-# @arhen/pi-vision
+# @arhen/pi-core-vision
 
-[![npm version](https://img.shields.io/npm/v/@arhen%2Fpi-vision?color=cb3837&logo=npm&label=npm)](https://www.npmjs.com/package/@arhen/pi-vision)
-[![npm downloads](https://img.shields.io/npm/dm/@arhen%2Fpi-vision)](https://www.npmjs.com/package/@arhen/pi-vision)
+[![npm version](https://img.shields.io/npm/v/@arhen%2Fpi-vision?color=cb3837&logo=npm&label=npm)](https://www.npmjs.com/package/@arhen/pi-core-vision)
+[![npm downloads](https://img.shields.io/npm/dm/@arhen%2Fpi-vision)](https://www.npmjs.com/package/@arhen/pi-core-vision)
 [![pi extension](https://img.shields.io/badge/pi-extension-blueviolet)](https://github.com/earendil-works/pi-coding-agent)
-[![license](https://img.shields.io/github/license/arhen/pi-vision)](LICENSE)
+[![license](https://img.shields.io/github/license/arhen/pi-core-vision)](LICENSE)
 
 Transparent vision fallback for text-only models in [pi](https://pi.dev).
 
@@ -18,13 +18,13 @@ The model sees one result either way — no double reading, no new tool to learn
 ## Install
 
 ```bash
-pi install git:github.com/arhen/pi-vision
+pi install git:github.com/arhen/pi-core-vision
 ```
 
 or try without installing:
 
 ```bash
-pi -e git:github.com/arhen/pi-vision
+pi -e git:github.com/arhen/pi-core-vision
 ```
 
 ## Configure

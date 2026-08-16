@@ -7,11 +7,11 @@
   "type": "module",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/arhen/pi-vision.git"
+    "url": "git+https://github.com/arhen/pi-core-vision.git"
   },
-  "homepage": "https://github.com/arhen/pi-vision#readme",
+  "homepage": "https://github.com/arhen/pi-core-vision#readme",
   "bugs": {
-    "url": "https://github.com/arhen/pi-vision/issues"
+    "url": "https://github.com/arhen/pi-core-vision/issues"
   },
   "keywords": [
     "pi-package",
