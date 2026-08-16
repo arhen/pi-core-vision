@@ -167,12 +167,17 @@ async function describeOnce(
   if (!res.ok && res.status !== 401 && res.status !== 403) {
     const bodyText = await res.text().catch(() => "");
     const waitMs = res.status === 429 ? retryAfterMs(res.headers.get("retry-after"), bodyText) : 1500;
-    await Promise.race([
-      new Promise((r) => setTimeout(r, waitMs)),
-      signal ? new Promise((_, reject) => signal.addEventListener("abort", () => reject(new Error("pi-vision: aborted during retry")), { once: true })) : Promise.resolve(),
-    ]).catch((e: unknown) => {
-      throw e instanceof Error ? e : new Error("pi-vision: aborted during retry");
-    });
+    const sleep = new Promise((r) => setTimeout(r, waitMs));
+    if (signal) {
+      await Promise.race([
+        sleep,
+        new Promise((_, reject) => signal.addEventListener("abort", () => reject(new Error("pi-vision: aborted during retry")), { once: true })),
+      ]).catch((e: unknown) => {
+        throw e instanceof Error ? e : new Error("pi-vision: aborted during retry");
+      });
+    } else {
+      await sleep;
+    }
     res = await attempt();
   }
   if (!res.ok) {
