@@ -2,7 +2,7 @@
  * pi-vision core — pure logic, no pi imports. Runs under plain `bun` for self-checks.
  */
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, extname, join } from "node:path";
@@ -145,10 +145,12 @@ async function describeOnce(
       },
     ],
   });
-  const attempt = async (): Promise<Response> =>
-    fetch(`${cfg.baseUrl.replace(/\/+$/, "")}/chat/completions`, {
+  const attempt = async (): Promise<Response> => {
+    const timeoutSignal = AbortSignal.timeout(60_000);
+    const combined = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
+    return fetch(`${cfg.baseUrl.replace(/\/+$/, "")}/chat/completions`, {
       method: "POST",
-      signal,
+      signal: combined,
       headers: {
         "content-type": "application/json",
         authorization: `Bearer ${cfg.apiKey}`,
@@ -156,6 +158,7 @@ async function describeOnce(
       },
       body,
     });
+  };
 
   let res = await attempt();
   // One retry on transient failures (5xx/429/upstream-wrapped errors); skip for auth/config (401/403).
@@ -164,8 +167,12 @@ async function describeOnce(
   if (!res.ok && res.status !== 401 && res.status !== 403) {
     const bodyText = await res.text().catch(() => "");
     const waitMs = res.status === 429 ? retryAfterMs(res.headers.get("retry-after"), bodyText) : 1500;
-    await new Promise((r) => setTimeout(r, waitMs));
-    if (signal?.aborted) throw new Error("pi-vision: aborted during retry");
+    await Promise.race([
+      new Promise((r) => setTimeout(r, waitMs)),
+      signal ? new Promise((_, reject) => signal.addEventListener("abort", () => reject(new Error("pi-vision: aborted during retry")), { once: true })) : Promise.resolve(),
+    ]).catch((e: unknown) => {
+      throw e instanceof Error ? e : new Error("pi-vision: aborted during retry");
+    });
     res = await attempt();
   }
   if (!res.ok) {
@@ -327,7 +334,7 @@ function persistCache() {
 }
 
 export function cacheKey(data: string, cfg: VisionConfig): string {
-  return createHash("sha1").update(`${cfg.baseUrl}|${cfg.model}|${data}`).digest("hex");
+  return createHash("sha1").update(`${cfg.baseUrl}|${cfg.model}|${cfg.prompt ?? ""}|${cfg.maxTokens ?? ""}|${data}`).digest("hex");
 }
 
 export function cacheGet(key: string): string | undefined {

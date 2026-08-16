@@ -24,7 +24,7 @@
  *
  * Run self-checks: `bun src/self-check.ts`
  */
-import { existsSync, rmSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { extname, resolve } from "node:path";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import type { VisionConfig } from "./src/core.ts";
@@ -201,15 +201,16 @@ async function describeViaRegistry(
     const auth = await registry.getProviderAuth(cfg.provider ?? "");
     const baseUrl = auth?.auth.baseUrl ?? model.baseUrl;
     const apiKey = auth?.auth.apiKey;
-    if (!baseUrl || !apiKey) {
+    const headers = auth?.auth.headers as Record<string, string> | undefined;
+    if (!baseUrl || (!apiKey && !headers)) {
       throw new Error(`pi-vision: no resolved auth for provider ${cfg.provider} (openai-completions)`);
     }
     return describeBase64(
       data,
       mimeType,
-      { ...cfg, baseUrl, apiKey },
+      { ...cfg, baseUrl, apiKey: apiKey ?? "" },
       ctx.signal,
-      auth.auth.headers as Record<string, string> | undefined,
+      headers,
     );
   }
 
