@@ -5,6 +5,20 @@
 [![pi extension](https://img.shields.io/badge/pi-extension-blueviolet)](https://github.com/earendil-works/pi-coding-agent)
 [![license](https://img.shields.io/github/license/arhen/pi-core-vision)](LICENSE)
 
+## Install
+
+Requires the [pi coding agent](https://github.com/earendil-works/pi) — install it first: `npm install -g @earendil-works/pi-coding-agent`.
+
+```sh
+pi install git:github.com/arhen/pi-core-vision
+```
+
+or try without installing:
+
+```sh
+pi -e git:github.com/arhen/pi-core-vision
+```
+
 Transparent vision fallback for text-only models in [pi](https://pi.dev).
 
 Overrides the built-in `read` tool:
@@ -14,18 +28,6 @@ Overrides the built-in `read` tool:
 - **image + text-only model** → pi resizes the image (Photon WASM), then the extension sends pi's resized output to a vision model and returns a compact text description
 
 The model sees one result either way — no double reading, no new tool to learn. Text-only models (e.g. DeepSeek) can finally read screenshots, diagrams, and error messages.
-
-## Install
-
-```bash
-pi install git:github.com/arhen/pi-core-vision
-```
-
-or try without installing:
-
-```bash
-pi -e git:github.com/arhen/pi-core-vision
-```
 
 ## Configure
 
