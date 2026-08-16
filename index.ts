@@ -24,7 +24,7 @@
  *
  * Run self-checks: `bun src/self-check.ts`
  */
-import { existsSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { extname, resolve } from "node:path";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import type { VisionConfig } from "./src/core.ts";

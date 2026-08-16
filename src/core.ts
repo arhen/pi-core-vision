@@ -169,19 +169,24 @@ async function describeOnce(
     const waitMs = res.status === 429 ? retryAfterMs(res.headers.get("retry-after"), bodyText) : 1500;
     const sleep = new Promise((r) => setTimeout(r, waitMs));
     if (signal) {
-      await Promise.race([
-        sleep,
-        new Promise((_, reject) => signal.addEventListener("abort", () => reject(new Error("pi-vision: aborted during retry")), { once: true })),
-      ]).catch((e: unknown) => {
-        throw e instanceof Error ? e : new Error("pi-vision: aborted during retry");
-      });
+      const onAbort = () => rejectRetry(new Error("pi-vision: aborted during retry"));
+      signal.addEventListener("abort", onAbort, { once: true });
+      try {
+        await Promise.race([sleep, new Promise((_, reject) => rejectRetry(new Error("pi-vision: aborted during retry")))]).catch((e: unknown) => {
+          throw e instanceof Error ? e : new Error("pi-vision: aborted during retry");
+        });
+      } finally {
+        signal.removeEventListener("abort", onAbort);
+      }
     } else {
       await sleep;
     }
     res = await attempt();
   }
   if (!res.ok) {
-    const text = await res.text().catch(() => "");
+    const text = (await res.text().catch(() => ""))
+      .replace(/Bearer\s+\S+/gi, "Bearer ***")
+      .replace(/(authorization\s*[:=]\s*)[^\s,;]+/gi, "$1***");
     throw new Error(`pi-vision: vision API ${res.status}${cfg.model !== "" ? ` (${cfg.model})` : ""}: ${text.slice(0, 300)}`);
   }
   const dataJson = (await res.json()) as {
@@ -260,7 +265,13 @@ export function parseArgs(args: string): { action: "set" | "show" | "reset"; val
     if (!["baseUrl", "apiKey", "provider", "model", "prompt", "maxTokens"].includes(key)) {
       throw new Error(`Unknown setting "${key}". Known: baseUrl, apiKey, provider, model, prompt, maxTokens`);
     }
-    values[key] = key === "maxTokens" ? Number(value) : value;
+    if (key === "maxTokens") {
+      const n = Number(value);
+      if (!Number.isFinite(n) || n <= 0) throw new Error(`maxTokens must be a positive number, got "${value}"`);
+      values[key] = n;
+    } else {
+      values[key] = value;
+    }
   }
   return { action: "set", values };
 }

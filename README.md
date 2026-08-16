@@ -1,7 +1,7 @@
 # @arhen/pi-core-vision
 
-[![npm version](https://img.shields.io/npm/v/@arhen%2Fpi-vision?color=cb3837&logo=npm&label=npm)](https://www.npmjs.com/package/@arhen/pi-core-vision)
-[![npm downloads](https://img.shields.io/npm/dm/@arhen%2Fpi-vision)](https://www.npmjs.com/package/@arhen/pi-core-vision)
+[![npm version](https://img.shields.io/npm/v/@arhen%2Fpi-core-vision?color=cb3837&logo=npm&label=npm)](https://www.npmjs.com/package/@arhen/pi-core-vision)
+[![npm downloads](https://img.shields.io/npm/dm/@arhen%2Fpi-core-vision)](https://www.npmjs.com/package/@arhen/pi-core-vision)
 [![pi extension](https://img.shields.io/badge/pi-extension-blueviolet)](https://github.com/earendil-works/pi-coding-agent)
 [![license](https://img.shields.io/github/license/arhen/pi-core-vision)](LICENSE)
 
@@ -114,7 +114,6 @@ Findings:
 
 Caveats: single run per cell; gateway routing flakiness affects variance.
 
-Caveats: single run per cell; gateway routing flakiness affects variance.
 
 ## Development
 
