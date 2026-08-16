@@ -1,7 +1,7 @@
 {
-  "name": "pi-vision",
+  "name": "@arhen/pi-vision",
   "version": "1.1.0",
-  "description": "Transparent vision fallback for text-only pi models — overrides read so image files are described by a vision model when the active model cannot see images. Supports any OpenAI-compatible endpoint.",
+  "description": "Transparent vision fallback for text-only pi models \u2014 overrides read so image files are described by a vision model when the active model cannot see images. Supports any OpenAI-compatible endpoint.",
   "license": "MIT",
   "author": "arhen",
   "type": "module",
@@ -40,5 +40,9 @@
   },
   "scripts": {
     "prepublishOnly": "bun src/self-check.ts"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
   }
 }

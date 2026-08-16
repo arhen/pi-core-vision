@@ -1,7 +1,7 @@
-# pi-vision
+# @arhen/pi-vision
 
-[![npm version](https://img.shields.io/npm/v/pi-vision?color=cb3837&logo=npm&label=npm)](https://www.npmjs.com/package/pi-vision)
-[![npm downloads](https://img.shields.io/npm/dm/pi-vision)](https://www.npmjs.com/package/pi-vision)
+[![npm version](https://img.shields.io/npm/v/@arhen%2Fpi-vision?color=cb3837&logo=npm&label=npm)](https://www.npmjs.com/package/@arhen/pi-vision)
+[![npm downloads](https://img.shields.io/npm/dm/@arhen%2Fpi-vision)](https://www.npmjs.com/package/@arhen/pi-vision)
 [![pi extension](https://img.shields.io/badge/pi-extension-blueviolet)](https://github.com/earendil-works/pi-coding-agent)
 [![license](https://img.shields.io/github/license/arhen/pi-vision)](LICENSE)
 
