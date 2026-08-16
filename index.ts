@@ -219,10 +219,17 @@ async function describeViaRegistry(
   const cached = cacheGet(key);
   if (cached !== undefined) return { text: cached };
 
-  const message = await registry.complete(model, [
-    { type: "text", text: cfg.prompt },
-    { type: "image", data, mimeType },
-  ]);
+  const message = await registry.complete(model, {
+    messages: [
+      {
+        role: "user",
+        content: [
+          { type: "text", text: cfg.prompt },
+          { type: "image", data, mimeType },
+        ],
+      },
+    ],
+  });
   const text = (message.content ?? [])
     .filter((c) => c.type === "text")
     .map((c) => c.text)
