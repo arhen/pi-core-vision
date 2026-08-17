@@ -1,5 +1,9 @@
 # @arhen/pi-core-vision
 
+> [!IMPORTANT]
+> **ARCHIVED** — this package now lives in the [**pi-extensions monorepo**](https://github.com/arhen/pi-extensions/tree/main/packages/core/pi-core-vision).
+> Issues, releases, and new versions are managed there. This repository is kept for history; no further changes land here.
+
 [![npm version](https://img.shields.io/npm/v/@arhen%2Fpi-core-vision?color=cb3837&logo=npm&label=npm)](https://www.npmjs.com/package/@arhen/pi-core-vision)
 [![npm downloads](https://img.shields.io/npm/dm/@arhen%2Fpi-core-vision)](https://www.npmjs.com/package/@arhen/pi-core-vision)
 [![pi extension](https://img.shields.io/badge/pi-extension-blueviolet)](https://github.com/earendil-works/pi-coding-agent)
